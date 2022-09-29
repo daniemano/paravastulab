@@ -365,27 +365,6 @@ def double_click(filename):
     os.system(filename)
 
 
-def save_plot(plot, filename):
-    ggsave(plot, filename)
-
-
-def display_plot(plot):
-    plot.draw()
-
-
-def resize_plot(plot, dimension_1, dimension_2):
-    plot += theme(figure_size=(dimension_1, dimension_2))
-    return plot
-
-
-def save_plot(plot, filename, pyplot=False):
-    if pyplot == False:
-        rcParams.update({"text.usetex": False, "svg.fonttype": "none"})
-        ggsave(plot, filename)
-    else:
-        plot.savefig(filename)
-
-
 def find_potential_clashes(pdb_dataframe, atom_name_1, atom_name_2, distance_limit):
     pdb_dataframe_2 = pdb_dataframe
     pdb_dataframe_2["atom_name"] = pdb_dataframe_2.atom_name.str.slice(stop=1)
