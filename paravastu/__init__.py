@@ -14,7 +14,7 @@ from matplotlib import rcParams
 import matplotlib.pyplot as plt
 from itertools import combinations
 from itertools import combinations_with_replacement
-from plotnine import *
+from pathlib import Path
 
 labmodule = __import__(__name__)
 
@@ -326,6 +326,11 @@ def display_dataframe(dataframe):
 def get_chain_ids(pdb_dataframe):
     return pdb_dataframe.chain_id.unique()
 
+def get_current_directory():
+    print(os.getcwd())
+
+def change_directory(dir_path):
+    os.chdir(Path(dir_path))
 
 def list_file_type(filetype, return_aslist=False):
     if ("*" in filetype) is False:
