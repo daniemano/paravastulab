@@ -1,6 +1,8 @@
 from biopandas.pdb import PandasPdb
 import pandas
-import numpy
+import numpy as np
+from numpy.polynomial.polynomial import polyfit
+from amino_info.py import *
 import dtale
 import glob
 import os
@@ -17,76 +19,39 @@ from plotnine import *
 labmodule = __import__(__name__)
 
 
-def ReadPDBintoDataFrame(PDBFileName):
-    DataFrame = pandas.DataFrame(PandasPdb().read_pdb(PDBFileName).df["ATOM"])
-    file = open(PDBFileName, "r")
+def read_pdb(pdb_file):
+    dataframe = pandas.DataFrame(PandasPdb().read_pdb(pdb_file).df["ATOM"])
+    file = open(pdb_file, "r")
     text = file.readlines()
     file.close()
-    DataFrame.text = text
-    DataFrame.path = PDBFileName
-    return DataFrame
+    dataframe.text = text
+    dataframe.path = pdb_file
+    return dataframe
 
 
-def ReadFPLCintoDataFrame(FPLCFileName):
-    DataFrame = pandas.read_csv(FPLCFileName, sep="\t", encoding="UTF-16")
-    return DataFrame
+def read_fplc(fplc_file):
+    dataframe = pandas.read_csv(fplc_file, sep="\t", encoding="UTF-16")
+    return dataframe
 
 
-def GetAtomPosition(PDBDataFrame, SegmentID, ResidueNumber, AtomName):
-    DataFrame = PDBDataFrame.loc[PDBDataFrame["segment_id"] == SegmentID]
-    DataFrame = DataFrame.loc[PDBDataFrame["residue_number"] == ResidueNumber]
-    DataFrame = DataFrame.loc[PDBDataFrame["atom_name"] == AtomName]
-    DataFrame = DataFrame[["x_coord", "y_coord", "z_coord"]]
-    return DataFrame.to_numpy()
+def get_atom(pdb_dataframe, segment_id, residue_num, atom_name):
+    dataframe = pdb_dataframe.loc[pdb_dataframe["segment_id"] == segment_id]
+    dataframe = dataframe.loc[pdb_dataframe["residue_number"] == residue_num]
+    dataframe = dataframe.loc[pdb_dataframe["atom_name"] == atom_name]
+    dataframe = dataframe[["x_coord", "y_coord", "z_coord"]]
+    return dataframe.to_numpy()
 
 
-def GetSegmentIDs(PDBDataFrame):
-    SegmentSet = PDBDataFrame.segment_id.unique()
-    return SegmentSet
+def get_segments(pdb_dataframe):
+    segment_set = PDBDataFrame.segment_id.unique()
+    return segment_set
 
 
-def EuclideanDistance(coords1, coords2):
-    return numpy.linalg.norm(coords1 - coords2)
+def euclidean_distance(coords1, coords2):
+    return np.linalg.norm(coords1 - coords2)
 
 
-protein_letters = "ACDEFGHIKLMNPQRSTVWY"
-extended_protein_letters = "ACDEFGHIKLMNPQRSTVWYBXZJUO"
-protein_letters_1to3 = {
-    "A": "Ala",
-    "C": "Cys",
-    "D": "Asp",
-    "E": "Glu",
-    "F": "Phe",
-    "G": "Gly",
-    "H": "His",
-    "I": "Ile",
-    "K": "Lys",
-    "L": "Leu",
-    "M": "Met",
-    "N": "Asn",
-    "P": "Pro",
-    "Q": "Gln",
-    "R": "Arg",
-    "S": "Ser",
-    "T": "Thr",
-    "V": "Val",
-    "W": "Trp",
-    "Y": "Tyr",
-}
-protein_letters_1to3_extended = dict(
-    list(protein_letters_1to3.items())
-    + list(
-        {"B": "Asx", "X": "Xaa", "Z": "Glx", "J": "Xle", "U": "Sec", "O": "Pyl"}.items()
-    )
-)
-
-protein_letters_3to1 = {x[1]: x[0] for x in protein_letters_1to3.items()}
-protein_letters_3to1_extended = {
-    x[1]: x[0] for x in protein_letters_1to3_extended.items()
-}
-
-
-def ConvertToOneLetter(Sequence, custom_map=None, undef_code="X"):
+def convert_to_one_letter(sequence, custom_map=None, undef_code="X"):
 
     if custom_map is None:
         custom_map = {"Ter": "*"}
@@ -95,11 +60,11 @@ def ConvertToOneLetter(Sequence, custom_map=None, undef_code="X"):
     onecode = {k.upper(): v for k, v in protein_letters_3to1_extended.items()}
     # add the given termination codon code and custom maps
     onecode.update((k.upper(), v) for k, v in custom_map.items())
-    SequenceList = [Sequence[3 * i : 3 * (i + 1)] for i in range(len(Sequence) // 3)]
-    return "".join(onecode.get(aa.upper(), undef_code) for aa in SequenceList)
+    sequence_list = [sequence[3 * i : 3 * (i + 1)] for i in range(len(sequence) // 3)]
+    return "".join(onecode.get(aa.upper(), undef_code) for aa in sequence_list)
 
 
-def ConvertToThreeLetter(Sequence, custom_map=None, undef_code="Xaa"):
+def convert_to_three_letter(sequence, custom_map=None, undef_code="Xaa"):
     if custom_map is None:
         custom_map = {"*": "Ter"}
     # not doing .update() on IUPACData dict with custom_map dict
@@ -109,112 +74,112 @@ def ConvertToThreeLetter(Sequence, custom_map=None, undef_code="Xaa"):
     )
     # We use a default of 'Xaa' for undefined letters
     # Note this will map '-' to 'Xaa' which may be undesirable!
-    return "".join(threecode.get(aa, undef_code) for aa in Sequence)
+    return "".join(threecode.get(aa, undef_code) for aa in sequence)
 
+def get_coordinates_from_index(pdb_dataframe, atom_index):
+    return pdb_dataframe.loc[pdb_dataframe["atom_number"] == atom_index][["x_coord", "y_coord", "z_coord"]].values
 
-def GetHydrogenBondDistances(
-    PDBDataFrame, ResidueStart, ResidueStop, Orientation="Parallel"
-):
-    Segments = GetSegmentIDs(PDBDataFrame)
-    ResiduesToCheck = numpy.arange(ResidueStart, ResidueStop + 1, 2)
-    if Orientation == "Parallel":
-        index = [i for i in range(0, len(Segments))]
-        SegmentStart = index[0]
-        SegmentStop = index[-1]
-        HBondDistances = numpy.zeros((SegmentStop - SegmentStart, len(ResiduesToCheck)))
-        for i in range(SegmentStart, SegmentStop):
-            for j in ResiduesToCheck:
-                HN = GetAtomPosition(PDBDataFrame, Segments[i + 1], j + 1, "HN")
-                CO = GetAtomPosition(PDBDataFrame, Segments[i], j, "O")
-                HBondDistances[
-                    i - 1, int(numpy.where(ResiduesToCheck == j)[0])
-                ] = EuclideanDistance(HN, CO)
-        HBondDistances = pandas.DataFrame(HBondDistances)
-        return HBondDistances
+def get_hydrogen_bond_distances(pdb_dataframe, residue_start, residue_stop, orientation="Parallel"):
+    segments = get_segments(pdb_dataframe)
+    residues_to_check = np.arange(residue_start, residue_stop + 1, 2)
+    if orientation == "Parallel":
+        index = [i for i in range(0, len(segments))]
+        segment_start = index[0]
+        segment_stop = index[-1]
+        hbond_distances = np.zeros((segment_stop - segment_start, len(residues_to_check)))
+        for i in range(segment_start, segment_stop):
+            for j in residues_to_check:
+                HN = get_atom(pdb_dataframe, segments[i + 1], j + 1, "HN")
+                CO = get_atom(pdb_dataframe, segments[i], j, "O")
+                hbond_distances[
+                    i - 1, int(np.where(residues_to_check == j)[0])
+                ] = euclidean_distance(HN, CO)
+        hbond_distances = pandas.DataFrame(hbond_distances)
+        return hbond_distances
     else:
-        SegmentIDPairs = list(combinations(Segments, 2))
-        PDBDataFrame2 = PDBDataFrame[PDBDataFrame["residue_number"].isin(range(ResidueStart, ResidueStop + 1))]
-        PDBDataFrame2 = PDBDataFrame2[PDBDataFrame2["atom_name"].isin(["HN", "O"])]
-        HBondDistances = pandas.DataFrame(index=Segments, columns=Segments)
-        for SegmentPair in SegmentIDPairs:
+        segmentid_pairs = list(combinations(segments, 2))
+        pdb_dataframe_2 = pdb_dataframe[pdb_dataframe["residue_number"].isin(range(residue_start, residue_stop + 1))]
+        pdb_dataframe_2 = pdb_dataframe_2[pdb_dataframe_2["atom_name"].isin(["HN", "O"])]
+        hbond_distances = pandas.DataFrame(index=segments, columns=segments)
+        for segment_pair in segmentid_pairs:
             # HN of first segment to O of second segment
-            HNArray = PDBDataFrame2[
-                (PDBDataFrame2["atom_name"] == "HN")
-                & (PDBDataFrame2["segment_id"] == SegmentPair[0])][["x_coord", "y_coord", "z_coord"]]
-            COArray = PDBDataFrame2[(PDBDataFrame2["atom_name"] == "O") & (PDBDataFrame2["segment_id"] == SegmentPair[1])][["x_coord", "y_coord", "z_coord"]]
-            HBondDistances[SegmentPair[0]][SegmentPair[1]] = pandas.DataFrame(
-                cdist(COArray, HNArray, metric="euclidean"),
-                index=range(ResidueStart, ResidueStop + 1),
-                columns=range(ResidueStart, ResidueStop + 1),
+            hn_array = pdb_dataframe_2[
+                (pdb_dataframe_2["atom_name"] == "HN")
+                & (pdb_dataframe_2["segment_id"] == segment_pair[0])][["x_coord", "y_coord", "z_coord"]]
+            co_array = pdb_dataframe_2[(pdb_dataframe_2["atom_name"] == "O") & (pdb_dataframe_2["segment_id"] == segment_pair[1])][["x_coord", "y_coord", "z_coord"]]
+            hbond_distances[segment_pair[0]][segment_pair[1]] = pandas.DataFrame(
+                cdist(co_array, hn_array, metric="euclidean"),
+                index=range(residue_start, residue_stop + 1),
+                columns=range(residue_start, residue_stop + 1),
             )
             # O  of first segment to HN of second segment
-            HNArray2 = PDBDataFrame2[
-                (PDBDataFrame2["atom_name"] == "HN")
-                & (PDBDataFrame2["segment_id"] == SegmentPair[1])
+            hn_array2 = pdb_dataframe_2[
+                (pdb_dataframe_2["atom_name"] == "HN")
+                & (pdb_dataframe_2["segment_id"] == segment_pair[1])
             ][["x_coord", "y_coord", "z_coord"]]
-            COArray2 = PDBDataFrame2[(PDBDataFrame2["atom_name"] == "O") & (PDBDataFrame2["segment_id"] == SegmentPair[0])][["x_coord", "y_coord", "z_coord"]]
-            HBondDistances[SegmentPair[1]][SegmentPair[0]] = pandas.DataFrame(
-                cdist(COArray2, HNArray2, metric="euclidean"),
-                index=range(ResidueStart, ResidueStop + 1),
-                columns=range(ResidueStart, ResidueStop + 1),
+            co_array2 = pdb_dataframe_2[(pdb_dataframe_2["atom_name"] == "O") & (pdb_dataframe_2["segment_id"] == segment_pair[0])][["x_coord", "y_coord", "z_coord"]]
+            hbond_distances[segment_pair[1]][segment_pair[0]] = pandas.DataFrame(
+                cdist(co_array2, hn_array2, metric="euclidean"),
+                index=range(residue_start, residue_stop + 1),
+                columns=range(residue_start, residue_stop + 1),
             )
             # Frames are displayed in order of residues, the horizontal represents the first segment, and the vertical represents the second segment
 
-        return HBondDistances
+        return hbond_distances
 
 
-def StyleHydrogenBondDataFrame(DataFrame):
-    def ColorRed(val):
+def style_hbond_dataframe(dataframe):
+    def color_red(val):
         if val <= 2.0:
             color = "red"
         else:
             color = "none"
         return "color: %s" % color
 
-    DataFrame = DataFrame.style.applymap(ColorRed)
-    return DataFrame
+    dataframe_ = dataframe.style.applymap(color_red)
+    return dataframe_
 
 
-def GetHydrogenBondDistancesFromMathematica(PDBDataFrame, ReferenceFile):
-    HBondArray = []
-    with open(ReferenceFile, "r") as reference:
+def get_hbond_distances_from_mathematica(pdb_dataframe, reference_file):
+    hbond_array = []
+    with open(reference_file, "r") as reference:
         for line in reference:
             search = line.split()
             if len(search) > 0 and search[0] == "bond":
-                HBondArray.append(search)
-    HBondArray = pandas.DataFrame(HBondArray).iloc[:, 1:3].astype("int32")
-    HBondArray = HBondArray + 1
-    DistanceDataFrame = pandas.DataFrame()
-    AtomArray1 = PDBDataFrame.iloc[pandas.Index(PDBDataFrame['atom_number']).get_indexer(HBondArray.iloc[:, 0])]
-    AtomArray2 = PDBDataFrame.iloc[pandas.Index(PDBDataFrame['atom_number']).get_indexer(HBondArray.iloc[:, 1])]
-    DistanceDataFrame["Segment 1"] = list(AtomArray1["segment_id"])
-    DistanceDataFrame["Segment 2"] = list(AtomArray2["segment_id"])
-    DistanceDataFrame["Residue 1"] = list(AtomArray1["residue_number"])
-    DistanceDataFrame["Residue 2"] = list(AtomArray2["residue_number"])
-    DistanceArray = []
-    for index, row in HBondArray.iterrows():
-        DistanceArray.append(
-            EuclideanDistance(
-                GetCoordinatesFromIndex(PDBDataFrame, row[1]),
-                GetCoordinatesFromIndex(PDBDataFrame, row[2]),
+                hbond_array.append(search)
+    hbond_array = pandas.DataFrame(hbond_array).iloc[:, 1:3].astype("int32")
+    hbond_array = hbond_array + 1
+    distance_dataframe = pandas.DataFrame()
+    atom_array1 = pdb_dataframe.iloc[pandas.Index(pdb_dataframe['atom_number']).get_indexer(hbond_array.iloc[:, 0])]
+    atom_array2 = pdb_dataframe.iloc[pandas.Index(pdb_dataframe['atom_number']).get_indexer(hbond_array.iloc[:, 1])]
+    distance_dataframe["Segment 1"] = list(atom_array1["segment_id"])
+    distance_dataframe["Segment 2"] = list(atom_array2["segment_id"])
+    distance_dataframe["Residue 1"] = list(atom_array1["residue_number"])
+    distance_dataframe["Residue 2"] = list(atom_array2["residue_number"])
+    distance_array = []
+    for index, row in hbond_array.iterrows():
+        distance_array.append(
+            euclidean_distance(
+                get_coordinates_from_index(pdb_dataframe, row[1]),
+                get_coordinates_from_index(pdb_dataframe, row[2]),
             )
         )
-    DistanceDataFrame["Distances"] = DistanceArray
-    return DistanceDataFrame
+    distance_dataframe["Distances"] = distance_array
+    return distance_dataframe
 
 
-def FindAngle(u, v):
+def find_angle(u, v):
     """
     Calculates the angle (degrees) between two vectors (as 1-d arrays) using
     dot product.
     """
 
-    V1 = u / numpy.linalg.norm(u)
-    V2 = v / numpy.linalg.norm(v)
-    return 180 / numpy.pi * numpy.arccos(numpy.dot(V1, V2))
+    V1 = u / np.linalg.norm(u)
+    V2 = v / np.linalg.norm(v)
+    return 180 / np.pi * np.arccos(np.dot(V1, V2))
 
 
-def CalculateDihedrals(prevCO, currN, currCA, currCO, nextN, cutoff=6.5):
+def calculate_dihedrals(prevCO, currN, currCA, currCO, nextN, cutoff=6.5):
     """
     Calculates phi and psi angles for an individual residue.
     """
@@ -231,27 +196,27 @@ def CalculateDihedrals(prevCO, currN, currCA, currCO, nextN, cutoff=6.5):
     #    raise ValueError(err)
 
     # Calculate necessary cross products (define vectors normal to planes)
-    V1 = numpy.cross(A, B)
-    V2 = numpy.cross(C, B)
-    V3 = numpy.cross(C, D)
+    V1 = np.cross(A, B)
+    V2 = np.cross(C, B)
+    V3 = np.cross(C, D)
 
     # Determine scalar angle between normal vectors
-    phi = FindAngle(V1, V2)
-    if numpy.dot(A, V2) > 0:
+    phi = find_angle(V1, V2)
+    if np.dot(A, V2) > 0:
         phi = -phi
 
-    psi = FindAngle(V2, V3)
-    if numpy.dot(D, V2) < 0:
+    psi = find_angle(V2, V3)
+    if np.dot(D, V2) < 0:
         psi = -psi
 
     return phi, psi
 
 
-def CalculateTorsion(PDBDataFrame):
+def calculate_torsion(pdb_dataframe):
     """
     Calculate the backbone torsion angles for a pdb file.
     """
-    pdb = PDBDataFrame.text
+    pdb = pdb_dataframe.text
     residue_list = []
     N = []
     CO = []
@@ -337,7 +302,7 @@ def CalculateTorsion(PDBDataFrame):
     for i in range(1, len(residue_list) - 1):
         try:
             dihedrals.append(
-                CalculateDihedrals(CO[i - 1], N[i], CA[i], CO[i], N[i + 1])
+                calculate_dihedrals(CO[i - 1], N[i], CA[i], CO[i], N[i + 1])
             )
             labels.append(residue_list[i])
         except ValueError:
@@ -353,157 +318,110 @@ def CalculateTorsion(PDBDataFrame):
     return torsion_angles
 
 
-def DisplayDataFrame(DataFrame):
-    DisplayFrame = dtale.show(DataFrame)
-    return DisplayFrame
+def display_dataframe(dataframe):
+    displayframe = dtale.show(dataframe)
+    return displayframe
 
 
-def GetChainIDs(PDBDataFrame):
-    return PDBDataFrame.chain_id.unique()
+def get_chain_ids(pdb_dataframe):
+    return pdb_dataframe.chain_id.unique()
 
 
-def ListFileType(FileType, ReturnAsList=False):
-    if ("*" in FileType) is False:
-        FileType = "*" + FileType
-    if ReturnAsList is True:
-        FileList = [file for file in glob.glob(FileType)]
-        return FileList
-    for file in glob.glob(FileType):
+def list_file_type(filetype, return_aslist=False):
+    if ("*" in filetype) is False:
+        filetype = "*" + filetype
+    if return_aslist is True:
+        file_list = [file for file in glob.glob(filetype)]
+        return file_list
+    for file in glob.glob(filetype):
         print(file)
 
 
-def ListDirectory(Path=os.getcwd(), ReturnAsList=False):
+def list_directory(Path=os.getcwd(), return_aslist=False):
     files = os.listdir(Path)
-    if ReturnAsList is True:
+    if return_aslist is True:
         return files
     else:
         for f in files:
             print(f)
 
 
-def DoubleClickButton(FileName):
-    button = ipywidgets.Button(description=FileName, tooltip="launch " + FileName)
+def double_click_button(filename):
+    button = ipywidgets.Button(description=filename, tooltip="launch " + filename)
     display(button)
 
     def button_eventhandler(obj):
-        os.system(FileName)
+        os.system(filename)
 
     button.on_click(button_eventhandler)
 
 
-def DoubleClick(FileName):
-    os.system(FileName)
+def double_click(filename):
+    os.system(filename)
 
 
-def RamachandranPlot(TorsionAngleDataFrame,ResidueRange=1,ChainIDsToExclude=[],Name="",ColorColumn=None, Colors=None):
-    if type(ResidueRange) is int:
-        ResidueStart = ResidueRange
-        ResidueStop = TorsionAngleDataFrame["Residue Number"].max()
-    elif type(ResidueRange) is list and len(ResidueRange) == 1:
-        ResidueStart = ResidueRange[0]
-        ResidueStop = TorsionAngleDataFrame["Residue Number"].max()
-    else:
-        ResidueStart = ResidueRange[0]
-        ResidueStop = ResidueRange[1]
-    residues = list(numpy.linspace(ResidueStart, ResidueStop, dtype=numpy.integer))
-    TorsionAngleDataFrame = TorsionAngleDataFrame[TorsionAngleDataFrame["Residue Number"].isin(residues)]
-    TorsionAngleDataFrame = TorsionAngleDataFrame[~TorsionAngleDataFrame["Chain ID"].isin(ChainIDsToExclude)]
-    plot = (
-        ggplot(aes(x="Phi", y="Psi"), data=TorsionAngleDataFrame)
-        + geom_point(colour="blue", alpha=0.5)
-        + scale_x_continuous(
-            limits=(-180, 180),
-            labels=(-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180),
-            breaks=(-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180),
-        )
-        + scale_y_continuous(
-            limits=(-180, 180),
-            labels=(-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180),
-            breaks=(-180, -150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180),
-        )
-        + coord_fixed(ratio=1)
-        + theme_bw()
-    )
-    if ResidueStart == ResidueStop:
-        plot += ggtitle(Name + " Torsion Angles for Residue " + str(ResidueStart))
-    else:
-        plot += ggtitle(
-            Name
-            + " Torsion Angles for Residues "
-            + str(ResidueStart)
-            + " to "
-            + str(ResidueStop)
-        )
-    if ColorColumn != None:
-        plot += aes(color=ColorColumn)
-        plot += geom_point()
-    if Colors != None:
-        plot += scale_color_manual(values=Colors)
+def save_plot(plot, filename):
+    ggsave(plot, filename)
+
+
+def display_plot(plot):
+    plot.draw()
+
+
+def resize_plot(plot, dimension_1, dimension_2):
+    plot += theme(figure_size=(dimension_1, dimension_2))
     return plot
 
 
-def SavePlot(Plot, FileName):
-    ggsave(Plot, FileName)
-
-
-def DisplayPlot(Plot):
-    Plot.draw()
-
-
-def ResizePlot(Plot, Dimension1, Dimension2):
-    Plot += theme(figure_size=(Dimension1, Dimension2))
-    return Plot
-
-
-def SavePlot(Plot, FileName, Pyplot=False):
-    if Pyplot == False:
+def save_plot(plot, filename, pyplot=False):
+    if pyplot == False:
         rcParams.update({"text.usetex": False, "svg.fonttype": "none"})
-        ggsave(Plot, FileName)
+        ggsave(plot, filename)
     else:
-        Plot.savefig(FileName)
+        plot.savefig(filename)
 
 
-def FindPotentialClashes(PDBDataFrame, Atom1Name, Atom2Name, DistanceLimit):
-    PDBDataFrame2 = PDBDataFrame
-    PDBDataFrame2["atom_name"] = PDBDataFrame2.atom_name.str.slice(stop=1)
-    Atom1Array = PDBDataFrame2.loc[PDBDataFrame2["atom_name"] == Atom1Name][["x_coord", "y_coord", "z_coord"]]
-    Atom2Array = PDBDataFrame2.loc[PDBDataFrame2["atom_name"] == Atom2Name][["x_coord", "y_coord", "z_coord"]]
-    if Atom1Name != Atom2Name:
-        Distances = cdist(Atom1Array, Atom2Array, metric="euclidean")
-    elif Atom1Name == Atom2Name:
-        Distances = pdist(Atom1Array)
-    Distances = Distances[Distances < DistanceLimit]
+def find_potential_clashes(pdb_dataframe, atom_name_1, atom_name_2, distance_limit):
+    pdb_dataframe_2 = pdb_dataframe
+    pdb_dataframe_2["atom_name"] = pdb_dataframe_2.atom_name.str.slice(stop=1)
+    atom_array_1 = pdb_dataframe_2.loc[pdb_dataframe_2["atom_name"] == atom_name_1][["x_coord", "y_coord", "z_coord"]]
+    atom_array_2 = pdb_dataframe_2.loc[pdb_dataframe_2["atom_name"] == atom_name_2][["x_coord", "y_coord", "z_coord"]]
+    if atom_name_1 != atom_name_2:
+        distances = cdist(atom_array_1, atom_array_2, metric="euclidean")
+    elif atom_name_1 == atom_name_2:
+        distances = pdist(atom_array_1)
+    distances = distances[distances < distance_limit]
     plt.figure(dpi=1200)
-    plt.hist(Distances)
+    plt.hist(distances)
     plt.xlabel(
-        Atom1Name
+        atom_name_1
         + "-"
-        + Atom2Name
+        + atom_name_2
         + " Distances up to "
-        + str(DistanceLimit)
+        + str(distance_limit)
         + " angstroms"
     )
-    Histogram = plt.gcf()
-    return Histogram
+    histogram = plt.gcf()
+    return histogram
 
 
 # TODO: x axis all equal 0 to 5
 
 
-def CheckAllPotentialClashes(PDBDataFrame, Save=False, FileName=None, Format=".png"):
+def check_all_potential_clashes(pdb_dataframe, save=False, filename=None, format=".png"):
     distances = [2.4, 2.9, 2.9, 2.75, 3.4, 3.22, 3.25, 3.04, 3.07, 3.1]
     for count, clash in enumerate(list(combinations_with_replacement("HCON", 2))):
-        Figure = FindPotentialClashes(PDBDataFrame, clash[0], clash[1], distances[count])
-        if Save:
-            Figure.savefig(
-                f"{FileName} {clash[0]}-{clash[1]} Potential Clashes{Format}",
+        figure = find_potential_clashes(pdb_dataframe, clash[0], clash[1], distances[count])
+        if save:
+            figure.savefig(
+                f"{filename} {clash[0]}-{clash[1]} Potential Clashes{format}",
                 facecolor="w",
             )
-        Figure.set_facecolor("white")
-        display(Figure)
+        figure.set_facecolor("white")
+        display(figure)
         plt.clf()
 
-#Plot 2D XY Scatter Plots
+#plot 2D XY Scatter Plots
 def list_plot(
     data, #Array of XY Datasets
     title="", #Title of Graph
@@ -524,8 +442,6 @@ def list_plot(
     curveFit=False, #approximate a curve fit (5th order polynomial)
     saveSVG=False, #save plot as an SVG file
 ):
-    import matplotlib.pyplot as plt
-    import numpy as np
 
     # strip data array into individual sets and plot them
     for i in range(len(data)):
@@ -562,7 +478,6 @@ def list_plot(
     plt.tick_params(axis="y", which="minor", length=minorlen, left = True, right = True)
 
     if curveFit:
-        from numpy.polynomial.polynomial import polyfit
         space = np.linspace(start=plt.xticks()[0][0], stop=plt.xticks()[0][-1], num=100)
         for i in range(len(data)):
             eq = np.polyfit(data[i][:, 0], data[i][:, 1], deg=10)
@@ -578,24 +493,25 @@ def list_plot(
     plt.legend(loc="best")
     return plt
         
-def FindParavastuFunction(SearchString):
+def find_paravastu_function(search_string):
     paravastu_functions = dir(labmodule)
-    return [item for item in paravastu_functions if item.find(SearchString) > -1]
+    return [item for item in paravastu_functions if item.find(search_string) > -1]
 
-def GetParavastuDocumentation():
+def get_paravastu_documentation():
     return help(labmodule)
 
-def GetAtomIndex(PDBDataFrame, SegmentID, ResidueNumber, AtomName):
-    DataFrame = PDBDataFrame.loc[PDBDataFrame["segment_id"] == SegmentID]
-    DataFrame = DataFrame.loc[PDBDataFrame["residue_number"] == ResidueNumber]
-    DataFrame = DataFrame.loc[PDBDataFrame["atom_name"] == AtomName]
-    return DataFrame.atom_number.values[0]
+def get_atom_index(pdb_dataframe, segment_id, residue_num, atom_name):
+    dataframe = pdb_dataframe.loc[pdb_dataframe["segment_id"] == segment_id]
+    dataframe = dataframe.loc[pdb_dataframe["residue_number"] == residue_num]
+    dataframe = dataframe.loc[pdb_dataframe["atom_name"] == atom_name]
+    return dataframe.atom_number.values[0]
 
 
-def GetAtomFromIndex(PDBDataFrame, AtomIndex):
-    return PDBDataFrame.loc[PDBDataFrame["atom_number"] == AtomIndex]
+def get_atom_from_index(pdb_dataframe, atom_index):
+    return pdb_dataframe.loc[pdb_dataframe["atom_number"] == atom_index]
 
 
-def GetCoordinatesFromIndex(PDBDataFrame, AtomIndex):
-    return PDBDataFrame.loc[PDBDataFrame["atom_number"] == AtomIndex][["x_coord", "y_coord", "z_coord"]].values
+
+
+
 
