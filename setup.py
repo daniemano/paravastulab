@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="paravastu",  # Replace with your own username
-    version="1.21",
+    version="1.3",
     author="Paravastu Lab",
     packages=setuptools.find_packages(),
     python_requires=">=3.6",
