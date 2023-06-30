@@ -6,5 +6,5 @@ setuptools.setup(
     author="Paravastu Lab",
     packages=setuptools.find_packages(),
     python_requires=">=3.6",
-    install_requires=["numpy", "pandas", "biopandas", "dtale", "plotnine"],
+    install_requires=["numpy", "pandas", "biopandas"],
 )
