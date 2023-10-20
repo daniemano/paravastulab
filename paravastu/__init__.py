@@ -3,7 +3,6 @@ import pandas
 import numpy as np
 from numpy.polynomial.polynomial import polyfit
 from amino_info.py import *
-import dtale
 import glob
 import os
 import ipywidgets
@@ -316,11 +315,6 @@ def calculate_torsion(pdb_dataframe):
     torsion_angles.drop("resdata", axis=1, inplace=True)
     torsion_angles["Residue Number"] = pandas.to_numeric(torsion_angles["Residue Number"])
     return torsion_angles
-
-
-def display_dataframe(dataframe):
-    displayframe = dtale.show(dataframe)
-    return displayframe
 
 
 def get_chain_ids(pdb_dataframe):
