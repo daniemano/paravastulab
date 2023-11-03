@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write 
-      contents: read  
+      contents: write  
     steps:
     - name: Download all the dists
       uses: actions/download-artifact@v3
@@ -52,7 +52,3 @@ jobs:
         path: dist/
     - name: Publish distribution 📦 to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-          username: __token__
-          password: ${{ secrets.PYPI_TOKEN }}
-
